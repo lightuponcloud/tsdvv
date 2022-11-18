@@ -1,6 +1,10 @@
 import { cmp_fun } from '../utils';
 import Clock from "./Clock";
 
+type Vector1 = (string | number)[][];
+type Vector2 = (string | number)[][][];
+type Vector = Vector1 | Vector2;
+
 export default class Dvv {
   /**
    * @description Constructs a new clock set without causal history, and receives one value that goes to the anonymous list.
@@ -22,7 +26,7 @@ export default class Dvv {
    * and receives one value that goes to the anonymous list.
    * The version vector SHOULD BE the output of join.
    */
-  public new_with_history(vector: [], value: any): Clock {
+  public new_with_history(vector: Vector, value: any): Clock {
     // defense against non-order preserving serialization
     const vectors = vector.sort((a, b) => cmp_fun(a, b));
     const entries = [];
@@ -38,7 +42,7 @@ export default class Dvv {
   /**
    * @description Same as new_with_history, but receives a list of values, instead of a single value.
    */
-  public new_list_with_history(vector: any, value: any): Clock {
+  public new_list_with_history(vector: Vector, value: any): Clock {
     return this.new_with_history(vector, Array.isArray(value) ? value : [value])
   }
 
@@ -47,7 +51,7 @@ export default class Dvv {
    * It discards (causally) outdated values, while merging all causal histories.
    */
   public sync(clocks: Clock[]): Clock {
-    return clocks.reverse().reduce((prevValue: any, currentValue: any) => this._sync(prevValue, currentValue));
+    return clocks.reverse().reduce((prevValue: Clock, currentValue: Clock) => this._sync(prevValue, currentValue));
   }
 
   private _sync(clock1: Clock, clock2: Clock): Clock {
@@ -95,20 +99,18 @@ export default class Dvv {
     if (counter1 >= counter2) {
       return counter1 - len1 >= counter2 - len2
         ? [the_id, counter1, values1]
-        // : [the_id, counter1, values1.slice(0).splice(0, counter1 - counter2 + len2)];
         : [the_id, counter1, values1.slice(0, counter1 - counter2 + len2)];
     }
 
     return counter2 - len2 >= counter1 - len1
       ? [the_id, counter2, values2]
-      // : [the_id, counter2, values2.slice(0).splice(0, counter2 - counter1 + len1)]
       : [the_id, counter2, values2.slice(0, counter2 - counter1 + len1)];
   }
 
   /**
    * @description Return a version vector that represents the causal history.
    */
-  public join(clock: Clock): any {
+  public join(clock: Clock): Vector {
     return clock.getEntries.reduce((acc: any, entry: any) => {
       entry && acc.push([entry[0], entry[1]])
       return acc;
@@ -152,18 +154,18 @@ export default class Dvv {
     return new Clock(this.event(dot.getEntries, the_id, clock_values), dot.getValues);
   }
 
-  public event(vector: any, the_id: string, value: any): any {
+  public event(vector: Vector, the_id: string, value: any): any {
     if (vector.length === 0) return [[the_id, 1, [value]]];
     if (vector.length > 0 && vector[0].length > 0 && vector[0][0] === the_id) {
       const values = Array.isArray(value)
         ? value.concat(vector[0][2])
         : [value].concat(vector[0][2])
 
-      return [[vector[0][0], vector[0][1] + 1, values].concat(vector.slice(1))];
+      return [[vector[0][0], (vector[0][1] as number) + 1, values].concat(vector.slice(1))];
     }
 
     if (vector.length > 0 && vector[0].length > 0) {
-      if (Array.isArray(vector[0][0]) || vector[0][0].length > the_id.length) {
+      if (Array.isArray(vector[0][0]) || (vector as Vector2)[0][0].length > the_id.length) {
         return [[the_id, 1, [value]]].concat(vector);
       }
     }
@@ -212,32 +214,33 @@ export default class Dvv {
     if (!Array.isArray(clock2.getList)) throw 'clock2 should be a list';
     if (clock1.getList.length === 2 && clock2.getList.length === 2) return this._equal(clock1.getEntries, clock2.getEntries) // DVVSet
 
-    return this._equal(clock1, clock2);
+    // could be problem
+    return this._equal(clock1.getList, clock2.getList); // (clock1, clock2)
   }
 
-  private _equal(vector1: any, vector2: any): boolean {
-    // new2 function
+  private _equal(vector1: Vector, vector2: Vector): boolean {
+    if (vector1.length === 0 && vector2.length === 0) return true;
+
+    if (vector1.length === 0 || vector1[0].length < 3 || vector2.length === 0 || vector2[0].length < 3) return false;
+    if (vector1[0][0] !== vector2[0][0]) return false;
+    if (vector1[0][1] !== vector2[0][1]) return false;
+    if ((vector1 as Vector2)[0][2].length !== (vector1 as Vector2)[0][2].length) return false;
+
+    return this._equal(vector1.slice(1), vector2.slice(1));
+
+    // solution 2
     // if (vector1.length === 0 && vector2.length === 0) return true;
-    // if (vector1[0].length < 3 && vector2[0].length < 3) return false;
-    // if (vector1[0][0] !== vector2[0][0]) return false;
-    // if (vector1[0][1] !== vector2[0][1]) return false;
-    // if (vector1[0][2] !== vector2[0][2]) return false;
-
-    // return this._equal(vector1.slice(1), vector2.slice(1));
-
-    // old function
-    if (vector1.length > 0 && vector1[0].length > 0 && vector2.length > 0 && vector2[0].length > 0) {
-      if (vector1[0][0] == vector2[0][0]) {
-        if (vector1[0].length > 1 && vector2[0].length > 1 && vector1[0][1] == vector2[0][1]) {
-          if (vector1[0][2] == vector2[0][2]) return this._equal(vector1.slice(0).splice(1, vector1.length), vector2.slice(0).splice(1, vector2.length))
-        }
-      }
-    }
-    return false;
-
+    // if (vector1.length > 0 && vector1[0].length > 0 && vector2.length > 0 && vector2[0].length > 0) {
+    //   if (vector1[0][0] == vector2[0][0]) {
+    //     if (vector1[0].length > 1 && vector2[0].length > 1 && vector1[0][1] == vector2[0][1]) {
+    //       if (vector1[0][2].length == vector2[0][2].length) return this._equal(vector1.slice(1), vector2.slice(1));
+    //     }
+    //   }
+    // }
+    // return false;
   }
 
-  private _greater(vector1: any, vector2: any, strict: any): boolean {
+  private _greater(vector1: Vector, vector2: Vector, strict: any): boolean {
     if (vector1.length === 0 && vector2.length === 0) return strict;
     if (vector2.length === 0) return true;
     if (vector1.length === 0) return false;
